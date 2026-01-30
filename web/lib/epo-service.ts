@@ -141,7 +141,8 @@ export async function searchEPO(cqlQuery: string): Promise<PatentsViewResponse> 
                 patent_abstract: abs,
                 patent_date: formattedDate,
                 assignees: assignees,
-                inventors: inventors
+                inventors: inventors,
+                source: 'EPO'
             };
         });
 

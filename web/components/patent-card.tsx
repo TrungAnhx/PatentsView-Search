@@ -1,6 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { CalendarDays, Users } from "lucide-react";
+import { CalendarDays, Users, Database } from "lucide-react";
 import { Patent } from "@/types";
 
 interface PatentCardProps {
@@ -11,14 +11,21 @@ interface PatentCardProps {
 export function PatentCard({ patent, onClick }: PatentCardProps) {
   const primaryAssignee = patent.assignees?.[0]?.assignee_organization || "Unknown Assignee";
   const firstInventor = patent.inventors?.[0] ? `${patent.inventors[0].inventor_first_name} ${patent.inventors[0].inventor_last_name}` : "Unknown Inventor";
+  const source = patent.source || "Unknown";
 
   return (
     <Card 
-      className="cursor-pointer hover:shadow-lg transition-all hover:border-primary/50 group h-full flex flex-col"
+      className="cursor-pointer hover:shadow-lg transition-all hover:border-primary/50 group h-full flex flex-col relative overflow-hidden"
       onClick={() => onClick(patent)}
     >
+      {/* Source Badge */}
+      <div className={`absolute top-0 right-0 px-2 py-1 rounded-bl-md text-[10px] font-bold text-white z-10 
+        ${source === 'EPO' ? 'bg-blue-600' : 'bg-green-600'}`}>
+        {source}
+      </div>
+
       <CardHeader className="pb-2">
-        <div className="flex justify-between items-start gap-2">
+        <div className="flex justify-between items-start gap-2 pr-8">
             <Badge variant="outline" className="mb-2 truncate max-w-[200px] text-xs font-normal text-muted-foreground">
                 {patent.patent_number}
             </Badge>

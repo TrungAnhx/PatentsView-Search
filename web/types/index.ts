@@ -20,6 +20,7 @@ export interface Patent {
   inventors?: Inventor[];
   assignees?: Assignee[];
   cpcs?: { cpc_group_id: string; cpc_group_title: string }[];
+  source?: 'EPO' | 'PatentsView';
 }
 
 export interface PatentsViewResponse {

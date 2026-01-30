@@ -3,6 +3,7 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import axios from 'axios';
 import { PatentsViewResponse, Patent } from '@/types';
+import { searchEPO } from '@/lib/epo-service';
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 
@@ -10,111 +11,133 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 interface SearchResult {
     data: PatentsViewResponse;
     generatedQuery: string;
+    source: 'EPO' | 'PatentsView';
 }
 
 export async function searchPatentsAction(userQuery: string, useAI: boolean = false): Promise<SearchResult> {
   try {
-    let finalQueryObject = {};
+    let finalQuery = ""; // This will be CQL (for EPO) or JSON (fallback)
     let queryToDisplay = "";
+    let searchSource: 'EPO' | 'PatentsView' = 'EPO'; // Default to EPO
 
+    // 1. Generate Query using AI (Targeting EPO CQL)
     if (useAI && process.env.GEMINI_API_KEY) {
-        // --- AI MODE: Advanced Query Generation ---
-        // SWITCH TO: 'gemini-flash-latest' (Stable alias provided in your list)
-        // This avoids the 429 Rate Limit error of the experimental 2.0 model.
         const model = genAI.getGenerativeModel({ model: 'gemini-flash-latest' });
         
-                const prompt = `
-                  You are an expert Patent Search Engineer. Your task is to convert a user's natural language query into a specific JSON format for the PatentsView API.
-        
-                  ### SYSTEM RULES
-                  1. **Target API:** PatentsView Search API (JSON Query).
-                  2. **Output Format:** RAW JSON ONLY. No markdown, no comments, no explanations.
-                  3. **Date Format:** YYYY-MM-DD.
-        
-                  ### DATA SCHEMA MAPPING
-                  - **"Vietnam", "VN", "Tru so tai VN":** Map to {"_eq": {"assignees.assignee_country": "VN"}}
-                  - **"Title" / "Tieu de":** "patent_title"
-                  - **"Abstract" / "Tom tat":** "patent_abstract"
-                  - **"Date" / "Ngay":** "patent_date"
-                  - **"Assignee" / "Chu so huu":** "assignees.assignee_organization"
-                  - **"Inventor" / "Tac gia":** "inventors.inventor_last_name"
-        
-                  ### EXAMPLES
-                  Input: "Tim don cua Apple nam 2024"
-                  Output: {"_and": [{"_text_any": {"assignees.assignee_organization": "Apple"}}, {"_gte": {"patent_date": "2024-01-01"}}, {"_lte": {"patent_date": "2024-12-31"}}]}
-        
-                  Input: "Tru so tai Viet Nam"
-                  Output: {"_eq": {"assignees.assignee_country": "VN"}}
-        
-                  ### YOUR TASK
-                  Convert the following Input into JSON.
-        
-                  Input: "${userQuery}"
-                  Output:
-                `;
+        const prompt = `
+          You are an expert Patent Search Engineer specializing in EPO OPS (CQL Syntax).
+          Your task is to convert a user's natural language query into a VALID CQL Query String.
+
+          ### TARGET: EPO OPS API (CQL)
+          - Use **CQL (Contextual Query Language)**.
+          - NO JSON. Just a query string.
+
+          ### FIELD MAPPING
+          - **Title:** ti
+          - **Abstract:** ab
+          - **Title OR Abstract:** txt (Use this for general keywords!)
+          - **Assignee (Applicant):** pa (e.g., pa="Apple")
+          - **Inventor:** in (e.g., in="Jobs")
+          - **Date:** pd (Format YYYYMMDD or range)
+            - 2024 -> pd=2024
+            - >= 2024-01-01 -> pd>=20240101
+          - **Classification (CPC):** cpc
+
+          ### EXAMPLES
+          Input: "Tim don cua Apple nam 2024"
+          Output: pa="Apple" AND pd=2024
+
+          Input: "camera sensor"
+          Output: txt="camera sensor"
+
+          Input: "Sony patents about VR"
+          Output: pa="Sony" AND txt="VR"
+          
+          Input: "assignee country la viet nam"
+          Output: pa="VN" (Note: EPO maps country codes in applicant fields sometimes, but strict country search is harder. Use free text matching or rely on applicant address fields if supported. Better: pa all "VN")
+
+          ### YOUR TASK
+          Input: "${userQuery}"
+          Output (CQL String Only):
+        `;
+
         try {
             const result = await model.generateContent(prompt);
             const response = await result.response;
-            const text = response.text();
-            
-            // Robust JSON Extraction: Find the first '{' and last '}'
-            const jsonStart = text.indexOf('{');
-            const jsonEnd = text.lastIndexOf('}');
-            
-            if (jsonStart !== -1 && jsonEnd !== -1) {
-                const jsonStr = text.substring(jsonStart, jsonEnd + 1);
-                finalQueryObject = JSON.parse(jsonStr);
-                queryToDisplay = JSON.stringify(finalQueryObject, null, 2);
-                console.log("AI Generated JSON Query (Success):", queryToDisplay);
-            } else {
-                // If extraction fails, throw to trigger fallback
-                throw new Error("No JSON found in AI response");
-            }
-
+            finalQuery = response.text().trim();
+            // Remove markdown codes if any
+            finalQuery = finalQuery.replace(/```cql/g, '').replace(/```/g, '').trim();
+            queryToDisplay = finalQuery;
+            console.log("AI Generated CQL Query:", finalQuery);
         } catch (geminiError) {
-            console.error("Gemini Critical Error:", geminiError);
-            // Fallback: Inform user in the query display that AI failed
-            finalQueryObject = { "_text_any": { "patent_title": userQuery, "patent_abstract": userQuery } };
-            queryToDisplay = `// AI GENERATION FAILED - FALLBACK TO SIMPLE SEARCH\n// Error: ${geminiError}\n\n` + JSON.stringify(finalQueryObject, null, 2);
+            console.error("Gemini Error:", geminiError);
+            // Fallback to simple CQL
+            finalQuery = `txt="${userQuery}"`;
+            queryToDisplay = "// AI Failed, using Simple Search:\n" + finalQuery;
         }
     } else {
-        // --- STANDARD MODE: Raw JSON or Simple Text ---
-        try {
-            finalQueryObject = JSON.parse(userQuery);
-            queryToDisplay = JSON.stringify(finalQueryObject, null, 2);
-            console.log("User provided valid JSON.");
-        } catch (e) {
-            finalQueryObject = {
-                "_or": [
-                    { "_text_any": { "patent_title": userQuery } },
-                    { "_text_any": { "patent_abstract": userQuery } },
-                    { "_text_any": { "assignees.assignee_organization": userQuery } }
-                ]
-            };
-            queryToDisplay = JSON.stringify(finalQueryObject, null, 2);
+        // Standard Mode (User inputs CQL directly or simple text)
+        // Check if looks like CQL (contains =)
+        if (userQuery.includes('=') || userQuery.includes(' AND ') || userQuery.includes(' OR ')) {
+            finalQuery = userQuery;
+            queryToDisplay = userQuery;
+        } else {
+            // Simple text -> Search in text fields
+            finalQuery = `txt="${userQuery}"`;
+            queryToDisplay = "// Auto-converted to CQL:\n" + finalQuery;
         }
     }
 
-    // 2. Execute the query
-    const results = await executePatentsViewQuery(finalQueryObject);
-    
-    return {
-        data: results,
-        generatedQuery: queryToDisplay
-    };
+    // 2. Execute Query (Try EPO First)
+    try {
+        console.log(`Executing EPO Search with: ${finalQuery}`);
+        const epoResults = await searchEPO(finalQuery);
+        
+        // If results found, return them
+        if (epoResults.count > 0) {
+            return {
+                data: epoResults,
+                generatedQuery: queryToDisplay,
+                source: 'EPO'
+            };
+        } else {
+             console.log("EPO returned 0 results. Trying PatentsView as fallback...");
+             throw new Error("Zero results from EPO"); // Trigger catch block to try PatentsView
+        }
 
+    } catch (epoError) {
+        console.warn("EPO Search Failed or Empty. Falling back to PatentsView.", epoError);
+        
+        // --- FALLBACK TO PATENTSVIEW ---
+        searchSource = 'PatentsView';
+        
+        // We need to convert the query to PatentsView JSON format (since we prepared CQL)
+        // For simplicity in fallback, we just do a simple text search
+        const fallbackQueryObject = {
+            "_or": [
+                { "_text_any": { "patent_title": userQuery } },
+                { "_text_any": { "patent_abstract": userQuery } }
+            ]
+        };
+        const pvResults = await executePatentsViewQuery(fallbackQueryObject);
+        
+        return {
+            data: pvResults,
+            generatedQuery: "// EPO Failed (" + epoError + "). Fallback to PatentsView JSON:\n" + JSON.stringify(fallbackQueryObject, null, 2),
+            source: 'PatentsView'
+        };
+    }
   } catch (error) {
     console.error('Error in searchPatentsAction:', error);
     throw new Error('Failed to search patents.');
   }
 }
 
+// Keep existing PatentsView executor for fallback
 async function executePatentsViewQuery(queryObject: any) {
     const apiUrl = 'https://search.patentsview.org/api/v1/patent/';
-    
     try {
         const queryString = JSON.stringify(queryObject);
-
         const response = await axios.get(apiUrl, {
             params: {
                 q: queryString,
@@ -128,54 +151,45 @@ async function executePatentsViewQuery(queryObject: any) {
         });
 
         const rawPatents = response.data.patents || [];
-        
         const mappedPatents: Patent[] = rawPatents.map((p: any) => ({
             patent_id: p.patent_id || p.id,
-            // New API seems to use patent_id as the number sometimes, or separate patent_number
-            patent_number: p.patent_number || p.number || p.patent_id || "N/A",
+            patent_number: p.patent_number || p.number || "N/A",
             patent_title: p.patent_title || p.title || "No Title",
             patent_abstract: p.patent_abstract || p.abstract || "No Abstract Available",
             patent_date: p.patent_date || p.date || "N/A",
             inventors: p.inventors?.map((i: any) => ({
                 inventor_id: i.inventor_id || i.id,
-                // Fix: Map 'inventor_name_first' correctly
-                inventor_first_name: i.inventor_first_name || i.inventor_name_first || i.first_name || "",
-                inventor_last_name: i.inventor_last_name || i.inventor_name_last || i.last_name || ""
+                inventor_first_name: i.inventor_first_name || i.first_name || "",
+                inventor_last_name: i.inventor_last_name || i.last_name || ""
             })) || [],
             assignees: p.assignees?.map((a: any) => ({
                 assignee_id: a.assignee_id || a.id,
                 assignee_organization: a.assignee_organization || a.organization || "Unknown",
-                assignee_first_name: a.assignee_first_name || a.assignee_individual_name_first,
-                assignee_last_name: a.assignee_last_name || a.assignee_individual_name_last
-            })) || []
+                assignee_first_name: a.assignee_first_name,
+                assignee_last_name: a.assignee_last_name
+            })) || [],
+            source: 'PatentsView'
         }));
 
         return {
             patents: mappedPatents,
             count: response.data.count || mappedPatents.length,
-            total_patent_count: response.data.total_patent_count || response.data.count || 0
+            total_patent_count: response.data.total_patent_count || 0
         } as PatentsViewResponse;
-
     } catch (apiError: any) {
-        if (apiError.response) {
-             console.error("PatentsView API Error Status:", apiError.response.status);
-             console.error("PatentsView API Error Data:", JSON.stringify(apiError.response.data));
-        } else {
-             console.error("PatentsView API Message:", apiError.message);
-        }
+        console.error("PatentsView Fallback Error:", apiError.message);
         return { patents: [], count: 0, total_patent_count: 0 };
     }
 }
 
+// Keep Analysis function (Updated to use extra context)
 export async function analyzePatentAction(patentTitle: string, patentAbstract: string, extraContext: string = "") {
     if (!process.env.GEMINI_API_KEY) {
         return "Please provide a Gemini API Key in .env.local to use the Analysis feature.";
     }
-
     try {
         const model = genAI.getGenerativeModel({ model: 'gemini-flash-latest' });
         
-        // Handle missing abstract gracefully
         const abstractContent = patentAbstract && patentAbstract !== "No Abstract Available" && patentAbstract !== "No Abstract" 
             ? patentAbstract 
             : "Not provided in API response.";
@@ -188,7 +202,7 @@ export async function analyzePatentAction(patentTitle: string, patentAbstract: s
             Extra Context (Assignees/Inventors/CPC): ${extraContext}
 
             Task:
-            1. If Abstract is missing, INFER the likely technology and purpose based solely on the Title and Context (CPC/Assignees). STATE CLEARLY that this is an inference.
+            1. If Abstract is missing, INFER the likely technology and purpose based solely on the Title and Context.
             2. If Abstract is present, summarize it.
             
             Please provide the output in Markdown format with the following sections:
