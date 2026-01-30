@@ -53,7 +53,7 @@ export function PatentDetail({ patent, isOpen, onClose }: PatentDetailProps) {
 
   return (
     <Sheet open={isOpen} onOpenChange={onClose}>
-      <SheetContent className="w-[400px] sm:w-[540px] md:w-[700px] overflow-y-auto flex flex-col p-0 gap-0">
+      <SheetContent className="w-full sm:max-w-[90vw] md:max-w-[1000px] overflow-y-auto flex flex-col p-0 gap-0 sm:border-l">
         <div className="p-6 border-b bg-muted/20">
             <SheetHeader className="mb-4">
                 <div className="flex gap-2 mb-2">
@@ -114,7 +114,7 @@ export function PatentDetail({ patent, isOpen, onClose }: PatentDetailProps) {
                                 <h3 className="font-semibold mb-2 text-sm uppercase tracking-wider text-muted-foreground">Nhà sáng chế (Inventors)</h3>
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                     {patent.inventors?.map((inv, idx) => (
-                                        <div key={inv.inventor_id || idx} className="text-sm p-2 bg-slate-50 dark:bg-slate-900 rounded border">
+                                        <div key={`${inv.inventor_id}-${idx}`} className="text-sm p-2 bg-slate-50 dark:bg-slate-900 rounded border">
                                             {inv.inventor_first_name} {inv.inventor_last_name}
                                         </div>
                                     ))}
@@ -125,7 +125,7 @@ export function PatentDetail({ patent, isOpen, onClose }: PatentDetailProps) {
                                 <h3 className="font-semibold mb-2 text-sm uppercase tracking-wider text-muted-foreground">Chủ sở hữu (Assignees)</h3>
                                 <div className="space-y-2">
                                     {patent.assignees?.map((asg, idx) => (
-                                        <div key={asg.assignee_id || idx} className="text-sm">
+                                        <div key={`${asg.assignee_id}-${idx}`} className="text-sm">
                                             <div className="font-medium">{asg.assignee_organization}</div>
                                             <div className="text-xs text-muted-foreground">{asg.assignee_first_name} {asg.assignee_last_name}</div>
                                         </div>

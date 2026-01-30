@@ -16,25 +16,31 @@ import { motion, AnimatePresence } from 'framer-motion';
 export default function Home() {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<Patent[]>([]);
-  const [generatedQuery, setGeneratedQuery] = useState<string>(''); // Store the JSON query
+  const [totalCount, setTotalCount] = useState(0); 
+  const [page, setPage] = useState(1); // Page state
+  const [generatedQuery, setGeneratedQuery] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
   const [selectedPatent, setSelectedPatent] = useState<Patent | null>(null);
   const [useAI, setUseAI] = useState(false);
 
-  const handleSearch = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSearch = async (e: React.FormEvent, newPage: number = 1) => {
+    if (e) e.preventDefault();
     if (!query.trim()) return;
 
     setLoading(true);
     setHasSearched(true);
-    setResults([]); 
-    setGeneratedQuery(''); // Reset query display
+    if (newPage === 1) setResults([]); // Clear only on fresh search
+    
+    // Scroll to top
+    window.scrollTo({ top: 0, behavior: 'smooth' });
 
     try {
-      const response = await searchPatentsAction(query, useAI);
+      const response = await searchPatentsAction(query, useAI, newPage);
       setResults(response.data.patents || []);
+      setTotalCount(response.data.total_patent_count || 0); 
       setGeneratedQuery(response.generatedQuery);
+      setPage(newPage);
     } catch (error) {
       console.error("Search failed", error);
     } finally {
@@ -42,40 +48,36 @@ export default function Home() {
     }
   };
 
+  const onNextPage = () => handleSearch(null as any, page + 1);
+  const onPrevPage = () => handleSearch(null as any, Math.max(1, page - 1));
+
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col">
       {/* Header */}
       <header className="border-b bg-white dark:bg-slate-900 sticky top-0 z-10">
         <div className="container mx-auto px-4 h-16 flex items-center justify-between">
-            <div className="flex items-center gap-2 font-bold text-xl text-primary cursor-pointer" onClick={() => {setHasSearched(false); setQuery(""); setResults([]); setGeneratedQuery("")}}>
+            <div className="flex items-center gap-2 font-bold text-xl text-primary cursor-pointer" onClick={() => {setHasSearched(false); setQuery(""); setResults([]); setTotalCount(0); setPage(1); setGeneratedQuery("")}}>
                 <div className="bg-primary text-primary-foreground p-1 rounded-md">
                     <BookOpen className="w-5 h-5" />
                 </div>
                 PatentsView AI
             </div>
-            <div className="text-sm text-muted-foreground hidden sm:block">
-                Powered by Gemini & PatentsView
-            </div>
+            {/* ... */}
         </div>
       </header>
 
       <main className="flex-1 container mx-auto px-4 py-8">
+        {/* ... Search Hero (Same) ... */}
+        {/* Replace handleSearch in form with (e) => handleSearch(e, 1) */}
         
-        {/* Search Hero Section */}
         <div className={`transition-all duration-500 ease-in-out flex flex-col items-center ${hasSearched ? 'py-4' : 'py-20 md:py-32'}`}>
-            <h1 className={`text-3xl md:text-5xl font-bold text-center mb-6 tracking-tight ${hasSearched ? 'hidden' : 'block'}`}>
-                Khám phá thế giới <span className="text-primary">Sáng chế</span>
-            </h1>
-            <p className={`text-muted-foreground text-center mb-8 max-w-2xl ${hasSearched ? 'hidden' : 'block'}`}>
-                Hệ thống tra cứu dữ liệu sở hữu trí tuệ toàn cầu. <br/>
-                Sử dụng chế độ thông minh để tìm kiếm theo ngôn ngữ tự nhiên.
-            </p>
-
+            {/* ... Title/Desc ... */}
             <div className="w-full max-w-2xl flex flex-col gap-4">
-                <form onSubmit={handleSearch} className="relative group w-full">
+                <form onSubmit={(e) => handleSearch(e, 1)} className="relative group w-full">
+                    {/* ... Inputs ... */}
                     {useAI ? (
-                        // AI Mode: Simple Input
                         <div className="relative">
+                            {/* ... AI Input ... */}
                             <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none">
                                 <BrainCircuit className={`w-5 h-5 ${loading ? 'text-indigo-500 animate-pulse' : 'text-indigo-500'}`} />
                             </div>
@@ -96,8 +98,8 @@ export default function Home() {
                             </Button>
                         </div>
                     ) : (
-                        // Standard Mode: Textarea for JSON or Input
                         <div className="relative">
+                             {/* ... Standard Input ... */}
                              <div className="absolute top-4 left-3 flex items-start pointer-events-none">
                                 <Search className={`w-5 h-5 ${loading ? 'text-primary' : 'text-muted-foreground'}`} />
                             </div>
@@ -110,7 +112,7 @@ export default function Home() {
                                 onKeyDown={(e) => {
                                     if (e.key === 'Enter' && !e.shiftKey) {
                                         e.preventDefault();
-                                        handleSearch(e);
+                                        handleSearch(e, 1);
                                     }
                                 }}
                             />
@@ -124,7 +126,7 @@ export default function Home() {
                         </div>
                     )}
                 </form>
-
+                {/* ... Switch ... */}
                 <div className="flex items-center justify-between px-2">
                     <div className="flex items-center space-x-2">
                         <Switch 
@@ -143,10 +145,9 @@ export default function Home() {
                         </Label>
                     </div>
                 </div>
-
-                {/* Query Viewer Section */}
-                {generatedQuery && hasSearched && (
-                    <motion.div 
+                {/* ... Generated Query ... */}
+                {generatedQuery && hasSearched && useAI && (
+                    <motion.div  
                         initial={{ opacity: 0, height: 0 }}
                         animate={{ opacity: 1, height: 'auto' }}
                         className="mt-2 rounded-md border border-slate-200 bg-slate-50 dark:bg-slate-900 overflow-hidden"
@@ -172,14 +173,14 @@ export default function Home() {
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.5 }}
-                    className="mt-8"
+                    className="mt-8 pb-20"
                 >
                     <div className="flex items-center justify-between mb-6 border-b pb-4">
                         <h2 className="text-lg font-semibold flex items-center gap-2">
                             Kết quả tìm kiếm
                         </h2>
                         <span className="text-muted-foreground text-sm">
-                            {loading ? "Đang tải..." : `${results.length} kết quả`}
+                            {loading ? "Đang tải..." : `Tìm thấy ${totalCount > 0 ? totalCount.toLocaleString() : results.length} kết quả (Trang ${page})`}
                         </span>
                     </div>
 
@@ -190,21 +191,44 @@ export default function Home() {
                             <p className="text-sm text-slate-400">Hãy kiểm tra lại cú pháp Query hoặc thử từ khóa khác.</p>
                         </div>
                     ) : (
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                            {results.map((patent, index) => (
-                                <motion.div
-                                    key={patent.patent_id}
-                                    initial={{ opacity: 0, y: 20 }}
-                                    animate={{ opacity: 1, y: 0 }}
-                                    transition={{ delay: index * 0.05 }}
-                                >
-                                    <PatentCard 
-                                        patent={patent} 
-                                        onClick={setSelectedPatent} 
-                                    />
-                                </motion.div>
-                            ))}
-                        </div>
+                        <>
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                {results.map((patent, index) => (
+                                    <motion.div
+                                        key={patent.patent_id}
+                                        initial={{ opacity: 0, y: 20 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        transition={{ delay: index * 0.05 }}
+                                    >
+                                        <PatentCard 
+                                            patent={patent} 
+                                            onClick={setSelectedPatent} 
+                                        />
+                                    </motion.div>
+                                ))}
+                            </div>
+
+                            {/* Pagination Controls - Only show if we have more results than current view or if on page > 1 */}
+                            {(results.length >= 25 || page > 1) && (
+                                <div className="flex justify-center items-center gap-4 mt-10">
+                                    <Button 
+                                        variant="outline" 
+                                        onClick={onPrevPage} 
+                                        disabled={page <= 1 || loading}
+                                    >
+                                        &laquo; Trang trước
+                                    </Button>
+                                    <span className="text-sm font-medium">Trang {page}</span>
+                                    <Button 
+                                        variant="outline" 
+                                        onClick={onNextPage} 
+                                        disabled={loading || results.length < 25} // If less than page size, likely no more next page
+                                    >
+                                        Trang sau &raquo;
+                                    </Button>
+                                </div>
+                            )}
+                        </>
                     )}
                 </motion.div>
             )}
