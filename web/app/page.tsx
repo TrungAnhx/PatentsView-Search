@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Search, Sparkles, Loader2, BookOpen, BrainCircuit, Terminal, Download } from 'lucide-react';
+import { Search, Sparkles, Loader2, BookOpen, BrainCircuit, Terminal, Download, Orbit } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from "@/components/ui/switch";
@@ -47,39 +47,63 @@ export default function Home() {
     }
   };
 
-  const handleExport = () => {
+  const [isExporting, setIsExporting] = useState(false); // New state
+
+  const handleExport = async (mode: 'current' | 'top100' = 'current') => {
     if (results.length === 0) return;
+    setIsExporting(true);
 
-    // Define CSV headers
-    const headers = ["Patent Number", "Title", "Date", "Assignee", "Inventors", "Source", "Link"];
-    
-    // Map results to CSV rows
-    const csvRows = results.map(p => {
-      const assignee = p.assignees?.[0]?.assignee_organization || "N/A";
-      const inventors = p.inventors?.map(i => `${i.inventor_first_name} ${i.inventor_last_name}`).join("; ") || "N/A";
-      const cleanNumber = p.patent_number.replace(/[^a-zA-Z0-9]/g, '');
-      const link = `https://patents.google.com/patent/US${cleanNumber}`;
-      
-      return [
-        `"${p.patent_number}"`,
-        `"${p.patent_title.replace(/"/g, '""')}"`,
-        `"${p.patent_date}"`,
-        `"${assignee.replace(/"/g, '""')}"`,
-        `"${inventors.replace(/"/g, '""')}"`,
-        `"${p.source}"`,
-        `"${link}"`
-      ].join(",");
-    });
+    try {
+        let dataToExport = [...results];
 
-    const csvContent = [headers.join(","), ...csvRows].join("\n");
-    const blob = new Blob(["\ufeff" + csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.setAttribute("href", url);
-    link.setAttribute("download", `patents_export_${new Date().getTime()}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+        // If Top 100 mode and we only have ~50, fetch page 2
+        if (mode === 'top100' && page === 1 && totalCount > results.length) {
+            try {
+                const response = await searchPatentsAction(query, useAI, 2);
+                const page2Patents = response.data.patents || [];
+                
+                // Merge and deduplicate
+                const mergedMap = new Map();
+                dataToExport.forEach(p => mergedMap.set(p.patent_number, p));
+                page2Patents.forEach(p => mergedMap.set(p.patent_number, p));
+                dataToExport = Array.from(mergedMap.values()).slice(0, 100);
+            } catch (err) {
+                console.error("Failed to fetch more for export", err);
+                // Fallback to current results
+            }
+        }
+
+        // CSV Generation Logic
+        const headers = ["Patent Number", "Title", "Date", "Assignee", "Inventors", "Source", "Link"];
+        const csvRows = dataToExport.map(p => {
+            const assignee = p.assignees?.[0]?.assignee_organization || "N/A";
+            const inventors = p.inventors?.map(i => `${i.inventor_first_name} ${i.inventor_last_name}`).join("; ") || "N/A";
+            const cleanNumber = p.patent_number.replace(/[^a-zA-Z0-9]/g, '');
+            const link = `https://patents.google.com/patent/US${cleanNumber}`;
+            
+            return [
+                `"${p.patent_number}"`,
+                `"${p.patent_title.replace(/"/g, '""')}"`,
+                `"${p.patent_date}"`,
+                `"${assignee.replace(/"/g, '""')}"`,
+                `"${inventors.replace(/"/g, '""')}"`,
+                `"${p.source}"`,
+                `"${link}"`
+            ].join(",");
+        });
+
+        const csvContent = [headers.join(","), ...csvRows].join("\n");
+        const blob = new Blob(["\ufeff" + csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.setAttribute("href", url);
+        link.setAttribute("download", `patents_${mode}_${new Date().getTime()}.csv`);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    } finally {
+        setIsExporting(false);
+    }
   };
 
   const onNextPage = () => handleSearch(null as any, page + 1);
@@ -90,15 +114,20 @@ export default function Home() {
       <header className="border-b bg-white/80 dark:bg-slate-900/80 backdrop-blur-md sticky top-0 z-50">
         <div className="container mx-auto px-4 h-16 flex items-center justify-between">
             <div 
-                className="flex items-center gap-2 font-black text-2xl tracking-tighter cursor-pointer group" 
+                className="flex items-center gap-2.5 cursor-pointer group" 
                 onClick={() => {setHasSearched(false); setQuery(""); setResults([]); setTotalCount(0); setPage(1); setGeneratedQuery("")}}
             >
-                <div className="bg-gradient-to-tr from-primary to-indigo-600 text-primary-foreground p-1.5 rounded-xl shadow-indigo-200 shadow-lg group-hover:scale-110 transition-transform">
-                    <Sparkles className="w-6 h-6 fill-current" />
+                <div className="bg-indigo-600 text-white p-2 rounded-xl shadow-md group-hover:bg-indigo-700 transition-colors">
+                    <Orbit className="w-5 h-5" />
                 </div>
-                <span className="bg-clip-text text-transparent bg-gradient-to-r from-slate-900 to-slate-600 dark:from-white dark:to-slate-400">
-                    Patent<span className="text-indigo-600">Sphere</span>
-                </span>
+                <div className="flex flex-col -space-y-1.5">
+                    <span className="text-xl font-bold tracking-tight text-slate-900 dark:text-white">
+                        PATENT
+                    </span>
+                    <span className="text-[11px] font-black tracking-[0.3em] text-indigo-600 uppercase">
+                        Sphere
+                    </span>
+                </div>
             </div>
             <div className="hidden md:flex items-center gap-6">
                 <div className="text-[10px] uppercase tracking-widest font-bold text-slate-400 border-l pl-4">
@@ -229,15 +258,27 @@ export default function Home() {
                         </div>
                         
                         {!loading && results.length > 0 && (
-                            <Button 
-                                variant="outline" 
-                                size="sm" 
-                                className="gap-2"
-                                onClick={handleExport}
-                            >
-                                <Download className="w-4 h-4" />
-                                Xuất CSV
-                            </Button>
+                            <div className="flex items-center gap-2">
+                                <Button 
+                                    variant="outline" 
+                                    size="sm" 
+                                    className="gap-2"
+                                    onClick={() => handleExport(totalCount > results.length ? 'top100' : 'current')}
+                                    disabled={isExporting}
+                                >
+                                    {isExporting ? (
+                                        <Loader2 className="w-4 h-4 animate-spin" />
+                                    ) : (
+                                        <Download className="w-4 h-4" />
+                                    )}
+                                    {isExporting ? "Đang xử lý..." : (totalCount > results.length ? "Xuất Top 100" : "Xuất CSV")}
+                                </Button>
+                                {totalCount > 100 && (
+                                    <span className="text-[10px] text-muted-foreground hidden sm:block italic">
+                                        * Giới hạn 100 kết quả để đảm bảo ổn định
+                                    </span>
+                                )}
+                            </div>
                         )}
                     </div>
 

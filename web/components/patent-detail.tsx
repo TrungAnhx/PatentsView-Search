@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Patent } from "@/types";
 import { analyzePatentAction } from "@/app/actions";
-import { Bot, FileText, Loader2, Sparkles, ExternalLink, Globe } from "lucide-react";
+import { Bot, FileText, Loader2, Sparkles, ExternalLink, Globe, Languages } from "lucide-react";
 import ReactMarkdown from 'react-markdown';
 
 interface PatentDetailProps {
@@ -19,37 +19,46 @@ interface PatentDetailProps {
 }
 
 export function PatentDetail({ patent, isOpen, onClose }: PatentDetailProps) {
-  const [analysis, setAnalysis] = useState<string | null>(null);
+  const [analysis, setAnalysis] = useState<{vi: string, en: string} | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [language, setLanguage] = useState<'vi' | 'en'>('vi');
+
+  // Reset analysis when patent changes
+  useEffect(() => {
+    setAnalysis(null);
+    setLanguage('vi');
+  }, [patent?.patent_id]);
 
   if (!patent) return null;
 
   const handleAnalyze = async () => {
     setIsAnalyzing(true);
     try {
-        // Construct extra context string from available data
         const inventors = patent.inventors?.map(i => `${i.inventor_first_name} ${i.inventor_last_name}`).join(", ") || "Unknown";
         const assignees = patent.assignees?.map(a => a.assignee_organization).join(", ") || "Unknown";
-        
         const extraContext = `Inventors: ${inventors}. Assignees: ${assignees}.`;
         
-        const result = await analyzePatentAction(patent.patent_title, patent.patent_abstract, extraContext);
-        setAnalysis(result);
+        const resultJson = await analyzePatentAction(patent.patent_title, patent.patent_abstract, extraContext);
+        const parsed = JSON.parse(resultJson);
+        setAnalysis(parsed);
     } catch (error) {
         console.error("Analysis failed", error);
-        setAnalysis("Failed to analyze patent. Please try again.");
+        setAnalysis({ vi: "Không thể phân tích dữ liệu lúc này.", en: "Failed to analyze data." });
     } finally {
         setIsAnalyzing(false);
     }
   };
 
-  // Generate External Links
-  // Note: Patent number might contain "US" prefix or commas, strip them for safety if needed
-  // But usually PatentsView returns clean numbers.
-  const cleanNumber = patent.patent_number.replace(/,/g, '').replace(/^US/, '');
+  const cleanNumber = patent.patent_number.replace(/[^a-zA-Z0-9]/g, '');
   
-  const googlePatentLink = `https://patents.google.com/patent/US${cleanNumber}/en`;
-  const espacenetLink = `https://worldwide.espacenet.com/publicationDetails/biblio?CC=US&NR=${cleanNumber}&KC=&FT=D`;
+  // High-reliability search-based direct link
+  // We prepend US only if it's pure numbers. Then we use it in a search query.
+  const docNumber = /^[A-Za-z]{2}/.test(cleanNumber) ? cleanNumber : `US${cleanNumber}`;
+  
+  // Using the search parameter 'q' on patents.google.com is the most robust way 
+  // to find both grants and applications without knowing the kind code (A1, B2).
+  const googlePatentLink = `https://patents.google.com/?q=${docNumber}`;
+  const espacenetLink = `https://worldwide.espacenet.com/patent/search?q=${cleanNumber}`;
 
   return (
     <Sheet open={isOpen} onOpenChange={onClose}>
@@ -137,7 +146,20 @@ export function PatentDetail({ patent, isOpen, onClose }: PatentDetailProps) {
                 </TabsContent>
 
                 <TabsContent value="analysis" className="flex-1 p-0 m-0 overflow-hidden flex flex-col">
-                    <ScrollArea className="h-full">
+                    <div className="flex justify-end px-6 py-2 border-b bg-slate-50 dark:bg-slate-900/50">
+                        {analysis && (
+                            <Button 
+                                variant="ghost" 
+                                size="sm" 
+                                className="text-xs gap-2"
+                                onClick={() => setLanguage(language === 'vi' ? 'en' : 'vi')}
+                            >
+                                <Languages className="w-3.5 h-3.5" />
+                                {language === 'vi' ? "Xem bản gốc (English)" : "Xem bản dịch (Tiếng Việt)"}
+                            </Button>
+                        )}
+                    </div>
+                    <ScrollArea className="flex-1">
                         <div className="p-6">
                             {!analysis && !isAnalyzing ? (
                                 <div className="flex flex-col items-center justify-center h-[300px] text-center space-y-4">
@@ -147,7 +169,7 @@ export function PatentDetail({ patent, isOpen, onClose }: PatentDetailProps) {
                                     <div className="space-y-1">
                                         <h3 className="font-semibold text-lg">Khám phá nội dung sâu hơn</h3>
                                         <p className="text-sm text-muted-foreground max-w-xs mx-auto">
-                                            Sử dụng AI để tóm tắt nội dung, phân tích ứng dụng thực tế và đánh giá công nghệ dựa trên thông tin sẵn có.
+                                            Sử dụng AI để tóm tắt nội dung, phân tích ứng dụng thực tế và đánh giá công nghệ.
                                         </p>
                                     </div>
                                     <Button onClick={handleAnalyze} className="bg-indigo-600 hover:bg-indigo-700">
@@ -157,11 +179,11 @@ export function PatentDetail({ patent, isOpen, onClose }: PatentDetailProps) {
                             ) : isAnalyzing ? (
                                 <div className="flex flex-col items-center justify-center h-[300px] space-y-4">
                                     <Loader2 className="w-8 h-8 animate-spin text-indigo-600" />
-                                    <p className="text-sm text-muted-foreground animate-pulse">Đang suy luận và phân tích...</p>
+                                    <p className="text-sm text-muted-foreground animate-pulse">Đang phân tích đa ngôn ngữ...</p>
                                 </div>
                             ) : (
                                 <div className="prose prose-sm dark:prose-invert max-w-none">
-                                    <ReactMarkdown>{analysis || ""}</ReactMarkdown>
+                                    <ReactMarkdown>{language === 'vi' ? analysis.vi : analysis.en}</ReactMarkdown>
                                     <div className="mt-8 pt-4 border-t flex justify-center">
                                          <Button variant="outline" size="sm" onClick={handleAnalyze} disabled={isAnalyzing}>
                                             <Sparkles className="w-4 h-4 mr-2" /> Phân tích lại
