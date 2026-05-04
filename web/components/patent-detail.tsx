@@ -1,15 +1,15 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
-import { Patent } from "@/types";
-import { analyzePatentAction } from "@/app/actions";
-import { Bot, FileText, Loader2, Sparkles, ExternalLink, Globe, Languages } from "lucide-react";
+import { useEffect, useState } from 'react';
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Button } from '@/components/ui/button';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Badge } from '@/components/ui/badge';
+import { Separator } from '@/components/ui/separator';
+import { Patent } from '@/types';
+import { analyzePatentAction, fetchPatentDetailAction } from '@/app/actions';
+import { Bot, ExternalLink, FileText, Globe, Languages, Loader2, Sparkles } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 
 interface PatentDetailProps {
@@ -19,182 +19,205 @@ interface PatentDetailProps {
 }
 
 export function PatentDetail({ patent, isOpen, onClose }: PatentDetailProps) {
-  const [analysis, setAnalysis] = useState<{vi: string, en: string} | null>(null);
+  const [analysis, setAnalysis] = useState<{ vi: string; en: string } | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [enrichedPatent, setEnrichedPatent] = useState<Patent | null>(null);
+  const [isLoadingDetail, setIsLoadingDetail] = useState(false);
   const [language, setLanguage] = useState<'vi' | 'en'>('vi');
 
-  // Reset analysis when patent changes
   useEffect(() => {
     setAnalysis(null);
+    setEnrichedPatent(null);
     setLanguage('vi');
   }, [patent?.patent_id]);
 
+  useEffect(() => {
+    if (!patent || !isOpen) return;
+
+    let isCancelled = false;
+    setIsLoadingDetail(true);
+
+    fetchPatentDetailAction(patent)
+      .then((detail) => {
+        if (!isCancelled && detail) setEnrichedPatent(detail);
+      })
+      .catch((error) => {
+        console.error('Detail enrichment failed', error);
+      })
+      .finally(() => {
+        if (!isCancelled) setIsLoadingDetail(false);
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [isOpen, patent]);
+
   if (!patent) return null;
+
+  const displayPatent = enrichedPatent || patent;
 
   const handleAnalyze = async () => {
     setIsAnalyzing(true);
     try {
-        const inventors = patent.inventors?.map(i => `${i.inventor_first_name} ${i.inventor_last_name}`).join(", ") || "Unknown";
-        const assignees = patent.assignees?.map(a => a.assignee_organization).join(", ") || "Unknown";
-        const extraContext = `Inventors: ${inventors}. Assignees: ${assignees}.`;
-        
-        const resultJson = await analyzePatentAction(patent.patent_title, patent.patent_abstract, extraContext);
-        const parsed = JSON.parse(resultJson);
-        setAnalysis(parsed);
+      const inventors = displayPatent.inventors?.map((inventor) => `${inventor.inventor_first_name} ${inventor.inventor_last_name}`).join(', ') || 'Unknown';
+      const assignees = displayPatent.assignees?.map((assignee) => assignee.assignee_organization).join(', ') || 'Unknown';
+      const extraContext = `Inventors: ${inventors}. Assignees: ${assignees}.`;
+      const resultJson = await analyzePatentAction(displayPatent.patent_title, displayPatent.patent_abstract, extraContext);
+      setAnalysis(JSON.parse(resultJson));
     } catch (error) {
-        console.error("Analysis failed", error);
-        setAnalysis({ vi: "Không thể phân tích dữ liệu lúc này.", en: "Failed to analyze data." });
+      console.error('Analysis failed', error);
+      setAnalysis({ vi: 'Không thể phân tích dữ liệu lúc này.', en: 'Failed to analyze data.' });
     } finally {
-        setIsAnalyzing(false);
+      setIsAnalyzing(false);
     }
   };
 
-  const cleanNumber = patent.patent_number.replace(/[^a-zA-Z0-9]/g, '');
-  
-  // High-reliability search-based direct link
-  // We prepend US only if it's pure numbers. Then we use it in a search query.
+  const cleanNumber = displayPatent.patent_number.replace(/[^a-zA-Z0-9]/g, '');
   const docNumber = /^[A-Za-z]{2}/.test(cleanNumber) ? cleanNumber : `US${cleanNumber}`;
-  
-  // Using the search parameter 'q' on patents.google.com is the most robust way 
-  // to find both grants and applications without knowing the kind code (A1, B2).
-  const googlePatentLink = `https://patents.google.com/?q=${docNumber}`;
+  const googlePatentLink = `https://patents.google.com/patent/${docNumber}`;
   const espacenetLink = `https://worldwide.espacenet.com/patent/search?q=${cleanNumber}`;
+  const activeAnalysis = analysis ? (language === 'vi' ? analysis.vi : analysis.en) : '';
 
   return (
-    <Sheet open={isOpen} onOpenChange={onClose}>
-      <SheetContent className="w-full sm:max-w-[90vw] md:max-w-[1000px] overflow-y-auto flex flex-col p-0 gap-0 sm:border-l">
-        <div className="p-6 border-b bg-muted/20">
-            <SheetHeader className="mb-4">
-                <div className="flex gap-2 mb-2">
-                    <Badge variant="secondary">{patent.patent_number}</Badge>
-                    <Badge variant="outline">{patent.patent_date}</Badge>
-                </div>
-                <SheetTitle className="text-xl md:text-2xl leading-snug">{patent.patent_title}</SheetTitle>
-                <SheetDescription>
-                    {patent.assignees?.[0]?.assignee_organization || "Unknown Organization"}
-                </SheetDescription>
-            </SheetHeader>
-            
-            <div className="flex gap-3 mt-4">
-                <Button variant="outline" size="sm" className="h-8 gap-1 text-xs" asChild>
-                    <a href={googlePatentLink} target="_blank" rel="noopener noreferrer">
-                        <Globe className="w-3 h-3" />
-                        Google Patents
-                    </a>
-                </Button>
-                <Button variant="outline" size="sm" className="h-8 gap-1 text-xs" asChild>
-                    <a href={espacenetLink} target="_blank" rel="noopener noreferrer">
-                        <ExternalLink className="w-3 h-3" />
-                        Espacenet
-                    </a>
-                </Button>
+    <Sheet open={isOpen} onOpenChange={(open) => !open && onClose()}>
+      <SheetContent className="flex w-full flex-col gap-0 overflow-y-auto p-0 sm:max-w-[90vw] sm:border-l md:max-w-[1000px]">
+        <div className="border-b bg-gray-50 p-6">
+          <SheetHeader className="mb-4">
+            <div className="mb-2 flex gap-2">
+              <Badge variant="secondary">{displayPatent.patent_number}</Badge>
+              <Badge variant="outline">{displayPatent.patent_date}</Badge>
+              <Badge variant="outline">{displayPatent.source || 'Unknown'}</Badge>
+              {isLoadingDetail && (
+                <Badge variant="outline" className="gap-1">
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  Đang tải chi tiết
+                </Badge>
+              )}
             </div>
+            <SheetTitle className="text-xl leading-snug md:text-2xl">{displayPatent.patent_title}</SheetTitle>
+            <SheetDescription>{displayPatent.assignees?.[0]?.assignee_organization || 'Unknown Organization'}</SheetDescription>
+          </SheetHeader>
+
+          <div className="mt-4 flex flex-wrap gap-3">
+            <Button variant="outline" size="sm" className="h-8 gap-1 rounded-full text-xs" asChild>
+              <a href={googlePatentLink} target="_blank" rel="noopener noreferrer">
+                <Globe className="h-3 w-3" />
+                Google Patents
+              </a>
+            </Button>
+            <Button variant="outline" size="sm" className="h-8 gap-1 rounded-full text-xs" asChild>
+              <a href={espacenetLink} target="_blank" rel="noopener noreferrer">
+                <ExternalLink className="h-3 w-3" />
+                Espacenet
+              </a>
+            </Button>
+          </div>
         </div>
 
-        <div className="flex-1 overflow-hidden flex flex-col">
-            <Tabs defaultValue="details" className="flex-1 flex flex-col h-full">
-                <div className="px-6 pt-4 border-b">
-                    <TabsList className="grid w-full grid-cols-2">
-                        <TabsTrigger value="details" className="gap-2">
-                            <FileText className="w-4 h-4" /> Chi tiết
-                        </TabsTrigger>
-                        <TabsTrigger value="analysis" className="gap-2 text-indigo-600 data-[state=active]:text-indigo-700 data-[state=active]:bg-indigo-50">
-                            <Sparkles className="w-4 h-4" /> Phân tích AI
-                        </TabsTrigger>
-                    </TabsList>
-                </div>
+        <div className="flex flex-1 flex-col overflow-hidden">
+          <Tabs defaultValue="details" className="flex h-full flex-1 flex-col">
+            <div className="border-b px-6 pt-4">
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="details" className="gap-2">
+                  <FileText className="h-4 w-4" /> Chi tiết
+                </TabsTrigger>
+                <TabsTrigger value="analysis" className="gap-2 text-black data-[state=active]:bg-gray-100">
+                  <Sparkles className="h-4 w-4" /> Phân tích AI
+                </TabsTrigger>
+              </TabsList>
+            </div>
 
-                <TabsContent value="details" className="flex-1 p-0 m-0 overflow-hidden">
-                    <ScrollArea className="h-full">
-                        <div className="p-6 space-y-6">
-                            <section>
-                                <h3 className="font-semibold mb-2 text-sm uppercase tracking-wider text-muted-foreground">Tóm tắt (Abstract)</h3>
-                                <p className="text-sm leading-relaxed text-slate-700 dark:text-slate-300">
-                                    {patent.patent_abstract && patent.patent_abstract !== "No Abstract Available" 
-                                        ? patent.patent_abstract 
-                                        : <span className="text-muted-foreground italic">Dữ liệu tóm tắt chưa được API cập nhật. Vui lòng xem chi tiết tại link Google Patents phía trên.</span>
-                                    }
-                                </p>
-                            </section>
-                            
-                            <Separator />
+            <TabsContent value="details" className="m-0 flex-1 overflow-hidden p-0">
+              <ScrollArea className="h-full">
+                <div className="space-y-6 p-6">
+                  <section>
+                    <h3 className="mb-2 text-sm font-semibold uppercase tracking-wider text-gray-500">Tóm tắt</h3>
+                    <p className="text-sm leading-7 text-gray-700">
+                      {displayPatent.patent_abstract && displayPatent.patent_abstract !== 'No Abstract Available' && displayPatent.patent_abstract !== 'No Abstract' ? (
+                        displayPatent.patent_abstract
+                      ) : (
+                        <span className="italic text-gray-500">
+                          Dữ liệu tóm tắt chưa được API trả về. Vui lòng xem chi tiết tại Google Patents hoặc Espacenet.
+                        </span>
+                      )}
+                    </p>
+                  </section>
 
-                            <section>
-                                <h3 className="font-semibold mb-2 text-sm uppercase tracking-wider text-muted-foreground">Nhà sáng chế (Inventors)</h3>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                    {patent.inventors?.map((inv, idx) => (
-                                        <div key={`${inv.inventor_id}-${idx}`} className="text-sm p-2 bg-slate-50 dark:bg-slate-900 rounded border">
-                                            {inv.inventor_first_name} {inv.inventor_last_name}
-                                        </div>
-                                    ))}
-                                </div>
-                            </section>
+                  <Separator />
 
-                             <section>
-                                <h3 className="font-semibold mb-2 text-sm uppercase tracking-wider text-muted-foreground">Chủ sở hữu (Assignees)</h3>
-                                <div className="space-y-2">
-                                    {patent.assignees?.map((asg, idx) => (
-                                        <div key={`${asg.assignee_id}-${idx}`} className="text-sm">
-                                            <div className="font-medium">{asg.assignee_organization}</div>
-                                            <div className="text-xs text-muted-foreground">{asg.assignee_first_name} {asg.assignee_last_name}</div>
-                                        </div>
-                                    ))}
-                                </div>
-                            </section>
+                  <section>
+                    <h3 className="mb-2 text-sm font-semibold uppercase tracking-wider text-gray-500">Nhà sáng chế</h3>
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      {displayPatent.inventors?.length ? displayPatent.inventors.map((inventor, index) => (
+                        <div key={`${inventor.inventor_id}-${index}`} className="rounded-lg border bg-gray-50 p-2 text-sm">
+                          {inventor.inventor_first_name} {inventor.inventor_last_name}
                         </div>
-                    </ScrollArea>
-                </TabsContent>
-
-                <TabsContent value="analysis" className="flex-1 p-0 m-0 overflow-hidden flex flex-col">
-                    <div className="flex justify-end px-6 py-2 border-b bg-slate-50 dark:bg-slate-900/50">
-                        {analysis && (
-                            <Button 
-                                variant="ghost" 
-                                size="sm" 
-                                className="text-xs gap-2"
-                                onClick={() => setLanguage(language === 'vi' ? 'en' : 'vi')}
-                            >
-                                <Languages className="w-3.5 h-3.5" />
-                                {language === 'vi' ? "Xem bản gốc (English)" : "Xem bản dịch (Tiếng Việt)"}
-                            </Button>
-                        )}
+                      )) : <p className="text-sm text-gray-500">Chưa có dữ liệu nhà sáng chế.</p>}
                     </div>
-                    <ScrollArea className="flex-1">
-                        <div className="p-6">
-                            {!analysis && !isAnalyzing ? (
-                                <div className="flex flex-col items-center justify-center h-[300px] text-center space-y-4">
-                                    <div className="p-4 bg-indigo-50 rounded-full">
-                                        <Bot className="w-8 h-8 text-indigo-600" />
-                                    </div>
-                                    <div className="space-y-1">
-                                        <h3 className="font-semibold text-lg">Khám phá nội dung sâu hơn</h3>
-                                        <p className="text-sm text-muted-foreground max-w-xs mx-auto">
-                                            Sử dụng AI để tóm tắt nội dung, phân tích ứng dụng thực tế và đánh giá công nghệ.
-                                        </p>
-                                    </div>
-                                    <Button onClick={handleAnalyze} className="bg-indigo-600 hover:bg-indigo-700">
-                                        <Sparkles className="w-4 h-4 mr-2" /> Bắt đầu phân tích
-                                    </Button>
-                                </div>
-                            ) : isAnalyzing ? (
-                                <div className="flex flex-col items-center justify-center h-[300px] space-y-4">
-                                    <Loader2 className="w-8 h-8 animate-spin text-indigo-600" />
-                                    <p className="text-sm text-muted-foreground animate-pulse">Đang phân tích đa ngôn ngữ...</p>
-                                </div>
-                            ) : (
-                                <div className="prose prose-sm dark:prose-invert max-w-none">
-                                    <ReactMarkdown>{language === 'vi' ? analysis.vi : analysis.en}</ReactMarkdown>
-                                    <div className="mt-8 pt-4 border-t flex justify-center">
-                                         <Button variant="outline" size="sm" onClick={handleAnalyze} disabled={isAnalyzing}>
-                                            <Sparkles className="w-4 h-4 mr-2" /> Phân tích lại
-                                        </Button>
-                                    </div>
-                                </div>
-                            )}
+                  </section>
+
+                  <section>
+                    <h3 className="mb-2 text-sm font-semibold uppercase tracking-wider text-gray-500">Chủ sở hữu</h3>
+                    <div className="space-y-2">
+                      {displayPatent.assignees?.length ? displayPatent.assignees.map((assignee, index) => (
+                        <div key={`${assignee.assignee_id}-${index}`} className="text-sm">
+                          <div className="font-medium">{assignee.assignee_organization}</div>
+                          <div className="text-xs text-gray-500">{assignee.assignee_first_name} {assignee.assignee_last_name}</div>
                         </div>
-                    </ScrollArea>
-                </TabsContent>
-            </Tabs>
+                      )) : <p className="text-sm text-gray-500">Chưa có dữ liệu chủ sở hữu.</p>}
+                    </div>
+                  </section>
+                </div>
+              </ScrollArea>
+            </TabsContent>
+
+            <TabsContent value="analysis" className="m-0 flex flex-1 flex-col overflow-hidden p-0">
+              <div className="flex justify-end border-b bg-gray-50 px-6 py-2">
+                {analysis && (
+                  <Button variant="ghost" size="sm" className="gap-2 text-xs" onClick={() => setLanguage(language === 'vi' ? 'en' : 'vi')}>
+                    <Languages className="h-3.5 w-3.5" />
+                    {language === 'vi' ? 'Xem English' : 'Xem tiếng Việt'}
+                  </Button>
+                )}
+              </div>
+
+              <ScrollArea className="flex-1">
+                <div className="p-6">
+                  {!analysis && !isAnalyzing ? (
+                    <div className="flex h-[300px] flex-col items-center justify-center space-y-4 text-center">
+                      <div className="rounded-full bg-gray-100 p-4">
+                        <Bot className="h-8 w-8 text-black" />
+                      </div>
+                      <div className="space-y-1">
+                        <h3 className="text-lg font-semibold">Khám phá nội dung sâu hơn</h3>
+                        <p className="mx-auto max-w-xs text-sm text-gray-500">
+                          AI sẽ tóm tắt nội dung, gợi ý ứng dụng thực tế và đánh giá hướng công nghệ của bằng sáng chế này.
+                        </p>
+                      </div>
+                      <Button onClick={handleAnalyze} className="rounded-full bg-black hover:bg-gray-800">
+                        <Sparkles className="mr-2 h-4 w-4" /> Bắt đầu phân tích
+                      </Button>
+                    </div>
+                  ) : isAnalyzing ? (
+                    <div className="flex h-[300px] flex-col items-center justify-center space-y-4">
+                      <Loader2 className="h-8 w-8 animate-spin text-black" />
+                      <p className="animate-pulse text-sm text-gray-500">Đang phân tích đa ngôn ngữ...</p>
+                    </div>
+                  ) : (
+                    <div className="prose prose-sm max-w-none">
+                      <ReactMarkdown>{activeAnalysis}</ReactMarkdown>
+                      <div className="mt-8 flex justify-center border-t pt-4">
+                        <Button variant="outline" size="sm" onClick={handleAnalyze} disabled={isAnalyzing}>
+                          <Sparkles className="mr-2 h-4 w-4" /> Phân tích lại
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </ScrollArea>
+            </TabsContent>
+          </Tabs>
         </div>
       </SheetContent>
     </Sheet>

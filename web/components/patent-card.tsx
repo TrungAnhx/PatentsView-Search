@@ -1,6 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { CalendarDays, Users, Database } from "lucide-react";
+import { CalendarDays, Users } from "lucide-react";
 import { Patent } from "@/types";
 
 interface PatentCardProps {

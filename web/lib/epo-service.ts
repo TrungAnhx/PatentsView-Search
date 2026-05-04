@@ -199,3 +199,76 @@ export async function searchEPO(cqlQuery: string, page: number = 1): Promise<Pat
         return { patents: [], count: 0, total_patent_count: 0 };
     }
 }
+
+export async function getEPODetail(publicationNumber: string): Promise<Patent | null> {
+    try {
+        const token = await getAccessToken();
+        const cleanNumber = publicationNumber.replace(/[^a-zA-Z0-9]/g, '');
+        if (!cleanNumber) return null;
+
+        const detailUrl = `${EPO_BASE_URL}/published-data/publication/epodoc/${cleanNumber}/biblio,abstract`;
+        const detailRes = await axios.get(detailUrl, {
+            headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/xml' }
+        });
+        const detailJson = await parseStringPromise(detailRes.data);
+        const exchangeDoc = detailJson['ops:world-patent-data']?.['exchange-documents']?.[0]?.['exchange-document']?.[0];
+
+        return exchangeDoc ? mapEPOExchangeDocument(exchangeDoc, cleanNumber) : null;
+    } catch (error: any) {
+        console.warn("EPO Detail Fetch Failed:", error.response?.data || error.message);
+        return null;
+    }
+}
+
+function mapEPOExchangeDocument(doc: any, fallbackId: string): Patent {
+    const biblio = doc['bibliographic-data']?.[0];
+    if (!biblio) {
+        return {
+            patent_id: fallbackId,
+            patent_number: fallbackId,
+            patent_title: "Title Not Available",
+            patent_abstract: "No Abstract",
+            patent_date: "N/A",
+            assignees: [],
+            inventors: [],
+            source: 'EPO'
+        };
+    }
+
+    const titleObj = biblio['invention-title']?.find((title: any) => title['$']?.['lang'] === 'en') || biblio['invention-title']?.[0];
+    const title = titleObj ? (titleObj['_'] || titleObj) : "No Title";
+    const pubRef = biblio['publication-reference']?.[0]?.['document-id']?.[0];
+    const docNumber = pubRef ? `${pubRef['country']?.[0] || ''}${pubRef['doc-number']?.[0] || fallbackId}` : fallbackId;
+    const dateStr = pubRef?.['date']?.[0] || "";
+    const formattedDate = dateStr.length === 8 ? `${dateStr.substring(0,4)}-${dateStr.substring(4,6)}-${dateStr.substring(6,8)}` : dateStr || "N/A";
+    const abstract = doc['abstract']?.[0]?.['p']?.map((paragraph: any) => paragraph['_'] || paragraph).join('\n\n') || "No Abstract";
+
+    const applicants = biblio['parties']?.[0]?.['applicants']?.[0]?.['applicant'] || [];
+    const assignees = applicants.map((applicant: any) => ({
+        assignee_id: "N/A",
+        assignee_organization: applicant['applicant-name']?.[0]?.['name']?.[0] || "Unknown",
+        assignee_country: applicant['applicant-name']?.[0]?.['$']?.['country']
+    }));
+
+    const inventorsList = biblio['parties']?.[0]?.['inventors']?.[0]?.['inventor'] || [];
+    const inventors = inventorsList.map((inventor: any) => {
+        const fullName = inventor['inventor-name']?.[0]?.['name']?.[0] || "Unknown";
+        const parts = fullName.split(' ');
+        return {
+            inventor_id: "N/A",
+            inventor_last_name: parts.pop() || "",
+            inventor_first_name: parts.join(' ')
+        };
+    });
+
+    return {
+        patent_id: docNumber,
+        patent_number: docNumber,
+        patent_title: title,
+        patent_abstract: abstract,
+        patent_date: formattedDate,
+        assignees,
+        inventors,
+        source: 'EPO'
+    };
+}
