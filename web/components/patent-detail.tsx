@@ -9,7 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Patent } from '@/types';
 import { analyzePatentAction, fetchPatentDetailAction } from '@/app/actions';
-import { Bot, ExternalLink, FileText, Globe, Languages, Loader2, Sparkles } from 'lucide-react';
+import { Bot, ExternalLink, FileText, Globe, Languages, Link2, Loader2, Network, Sparkles, Waypoints } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 
 interface PatentDetailProps {
@@ -118,9 +118,18 @@ export function PatentDetail({ patent, isOpen, onClose }: PatentDetailProps) {
         <div className="flex flex-1 flex-col overflow-hidden">
           <Tabs defaultValue="details" className="flex h-full flex-1 flex-col">
             <div className="border-b px-6 pt-4">
-              <TabsList className="grid w-full grid-cols-2">
+              <TabsList className="grid w-full grid-cols-5">
                 <TabsTrigger value="details" className="gap-2">
                   <FileText className="h-4 w-4" /> Chi tiết
+                </TabsTrigger>
+                <TabsTrigger value="claims" className="gap-2">
+                  <Waypoints className="h-4 w-4" /> Claims
+                </TabsTrigger>
+                <TabsTrigger value="family" className="gap-2">
+                  <Network className="h-4 w-4" /> Family
+                </TabsTrigger>
+                <TabsTrigger value="links" className="gap-2">
+                  <Link2 className="h-4 w-4" /> Links
                 </TabsTrigger>
                 <TabsTrigger value="analysis" className="gap-2 text-black data-[state=active]:bg-gray-100">
                   <Sparkles className="h-4 w-4" /> Phân tích AI
@@ -168,6 +177,65 @@ export function PatentDetail({ patent, isOpen, onClose }: PatentDetailProps) {
                       )) : <p className="text-sm text-gray-500">Chưa có dữ liệu chủ sở hữu.</p>}
                     </div>
                   </section>
+                </div>
+              </ScrollArea>
+            </TabsContent>
+
+            <TabsContent value="claims" className="m-0 flex-1 overflow-hidden p-0">
+              <ScrollArea className="h-full">
+                <div className="flex flex-col gap-4 p-6">
+                  <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                    <h3 className="font-semibold">Claims preview</h3>
+                    <p className="mt-2 text-sm leading-6 text-gray-600">
+                      EPO OPS search hiện tại đang lấy `biblio,abstract`. Claim text đầy đủ cần gọi thêm endpoint claims/full-cycle hoặc nguồn PDF/XML phù hợp theo từng jurisdiction.
+                    </p>
+                  </div>
+                  <div className="rounded-2xl border border-gray-200 p-4">
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">What is available now</p>
+                    <p className="mt-2 text-sm leading-6 text-gray-700">
+                      Bạn vẫn có thể dùng tab AI để tóm tắt phạm vi kỹ thuật từ title, abstract, assignee và inventor hiện có. Nút Google Patents/Espacenet phía trên vẫn mở full claims ở nguồn gốc.
+                    </p>
+                  </div>
+                </div>
+              </ScrollArea>
+            </TabsContent>
+
+            <TabsContent value="family" className="m-0 flex-1 overflow-hidden p-0">
+              <ScrollArea className="h-full">
+                <div className="flex flex-col gap-4 p-6">
+                  <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">Primary publication</p>
+                    <h3 className="mt-2 text-lg font-semibold">{displayPatent.patent_number}</h3>
+                    <p className="mt-1 text-sm text-gray-600">{displayPatent.patent_date || 'N/A'} · {displayPatent.source || 'Unknown source'}</p>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {(displayPatent.assignees || []).slice(0, 4).map((assignee, index) => (
+                      <div key={`${assignee.assignee_id}-${index}`} className="rounded-2xl border border-gray-200 p-4">
+                        <p className="text-xs text-gray-500">Assignee</p>
+                        <p className="mt-1 font-medium">{assignee.assignee_organization || 'Unknown'}</p>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-sm leading-6 text-gray-500">
+                    Family grouping sẽ chính xác hơn khi nối thêm EPO `equivalents` hoặc INPADOC family endpoint. UI đã có sẵn vùng hiển thị để bổ sung dữ liệu đó.
+                  </p>
+                </div>
+              </ScrollArea>
+            </TabsContent>
+
+            <TabsContent value="links" className="m-0 flex-1 overflow-hidden p-0">
+              <ScrollArea className="h-full">
+                <div className="grid gap-3 p-6 md:grid-cols-2">
+                  <a href={googlePatentLink} target="_blank" rel="noopener noreferrer" className="rounded-2xl border border-gray-200 p-4 transition-colors hover:bg-gray-50">
+                    <Globe className="h-5 w-5" />
+                    <h3 className="mt-3 font-semibold">Google Patents</h3>
+                    <p className="mt-1 text-sm leading-6 text-gray-600">Mở trang patent/source viewer, claims, images và citations ở Google Patents.</p>
+                  </a>
+                  <a href={espacenetLink} target="_blank" rel="noopener noreferrer" className="rounded-2xl border border-gray-200 p-4 transition-colors hover:bg-gray-50">
+                    <ExternalLink className="h-5 w-5" />
+                    <h3 className="mt-3 font-semibold">Espacenet</h3>
+                    <p className="mt-1 text-sm leading-6 text-gray-600">Mở record tại Espacenet để xem family, legal events và tài liệu gốc.</p>
+                  </a>
                 </div>
               </ScrollArea>
             </TabsContent>

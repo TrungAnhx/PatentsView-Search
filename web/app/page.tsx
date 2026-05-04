@@ -5,27 +5,37 @@ import {
   ArrowRight,
   BarChart3,
   BookOpen,
+  Bookmark,
   BrainCircuit,
   Check,
   ChevronDown,
+  Clipboard,
+  Clock,
+  Copy,
   Database,
   Download,
   FileSearch,
+  Filter,
   Globe2,
   Loader2,
   Rocket,
+  Scale,
   Search,
   ShieldCheck,
   Sparkles,
   Star,
   Terminal,
   Users,
+  type LucideIcon,
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Badge } from '@/components/ui/badge';
 import { PatentCard } from '@/components/patent-card';
 import { PatentDetail } from '@/components/patent-detail';
 import { searchPatentsAction } from './actions';
@@ -46,6 +56,9 @@ const sampleQueries = [
   'pn=EP AND txt all "battery thermal management"',
 ];
 
+type SourceFilter = 'all' | 'EPO' | 'PatentsView';
+type SortMode = 'relevance' | 'newest' | 'oldest' | 'assignee';
+
 export default function Home() {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<Patent[]>([]);
@@ -59,6 +72,19 @@ export default function Home() {
   const [useAI, setUseAI] = useState(true);
   const [activeTab, setActiveTab] = useState<DemoTab>('analyse');
   const [error, setError] = useState('');
+  const [openMenu, setOpenMenu] = useState<'solutions' | 'teams' | null>(null);
+  const [queryHistory, setQueryHistory] = useState<string[]>([]);
+  const [savedQueries, setSavedQueries] = useState<string[]>([]);
+  const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all');
+  const [yearFilter, setYearFilter] = useState('');
+  const [assigneeFilter, setAssigneeFilter] = useState('');
+  const [sortMode, setSortMode] = useState<SortMode>('relevance');
+  const [comparePatents, setComparePatents] = useState<Patent[]>([]);
+
+  useEffect(() => {
+    setQueryHistory(readStoredList('patentsphere-query-history'));
+    setSavedQueries(readStoredList('patentsphere-saved-queries'));
+  }, []);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -70,6 +96,27 @@ export default function Home() {
 
     return () => window.clearInterval(timer);
   }, []);
+
+  const visibleResults = useMemo(() => {
+    const filtered = results.filter((patent) => {
+      const sourceMatch = sourceFilter === 'all' || patent.source === sourceFilter;
+      const yearMatch = !yearFilter || patent.patent_date?.startsWith(yearFilter);
+      const assignee = patent.assignees?.[0]?.assignee_organization || '';
+      const assigneeMatch = !assigneeFilter || assignee.toLowerCase().includes(assigneeFilter.toLowerCase());
+      return sourceMatch && yearMatch && assigneeMatch;
+    });
+
+    return [...filtered].sort((first, second) => {
+      if (sortMode === 'newest') return (second.patent_date || '').localeCompare(first.patent_date || '');
+      if (sortMode === 'oldest') return (first.patent_date || '').localeCompare(second.patent_date || '');
+      if (sortMode === 'assignee') {
+        const firstAssignee = first.assignees?.[0]?.assignee_organization || '';
+        const secondAssignee = second.assignees?.[0]?.assignee_organization || '';
+        return firstAssignee.localeCompare(secondAssignee);
+      }
+      return 0;
+    });
+  }, [assigneeFilter, results, sortMode, sourceFilter, yearFilter]);
 
   const resultLabel = useMemo(() => {
     if (loading) return 'Đang truy vấn EPO và PatentsView...';
@@ -84,6 +131,30 @@ export default function Home() {
     setPage(1);
     setGeneratedQuery('');
     setError('');
+  };
+
+  const persistList = (key: string, values: string[]) => {
+    window.localStorage.setItem(key, JSON.stringify(values));
+  };
+
+  const rememberQuery = (value: string) => {
+    const nextHistory = [value, ...queryHistory.filter((item) => item !== value)].slice(0, 6);
+    setQueryHistory(nextHistory);
+    persistList('patentsphere-query-history', nextHistory);
+  };
+
+  const saveCurrentQuery = () => {
+    const trimmed = query.trim();
+    if (!trimmed) return;
+    const nextSaved = [trimmed, ...savedQueries.filter((item) => item !== trimmed)].slice(0, 8);
+    setSavedQueries(nextSaved);
+    persistList('patentsphere-saved-queries', nextSaved);
+  };
+
+  const removeSavedQuery = (value: string) => {
+    const nextSaved = savedQueries.filter((item) => item !== value);
+    setSavedQueries(nextSaved);
+    persistList('patentsphere-saved-queries', nextSaved);
   };
 
   const handleSearch = async (event?: FormEvent, newPage: number = 1) => {
@@ -103,6 +174,7 @@ export default function Home() {
       setTotalCount(response.data.total_patent_count || 0);
       setGeneratedQuery(response.generatedQuery);
       setPage(newPage);
+      rememberQuery(query.trim());
     } catch (searchError) {
       console.error('Search failed', searchError);
       setError('Không thể hoàn tất truy vấn lúc này. Hãy kiểm tra API key, cú pháp truy vấn hoặc thử lại sau.');
@@ -111,6 +183,58 @@ export default function Home() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleCopyGeneratedQuery = async () => {
+    if (!generatedQuery) return;
+    await navigator.clipboard.writeText(generatedQuery);
+  };
+
+  const handleExportBrief = () => {
+    if (visibleResults.length === 0) return;
+
+    const rows = visibleResults.slice(0, 10).map((patent, index) => {
+      const assignee = patent.assignees?.[0]?.assignee_organization || 'Unknown assignee';
+      const abstract = patent.patent_abstract && patent.patent_abstract !== 'No Abstract'
+        ? patent.patent_abstract.slice(0, 650)
+        : 'No abstract returned by source API.';
+      return [
+        `## ${index + 1}. ${patent.patent_title}`,
+        `- Patent: ${patent.patent_number}`,
+        `- Date: ${patent.patent_date || 'N/A'}`,
+        `- Assignee: ${assignee}`,
+        `- Source: ${patent.source || 'Unknown'}`,
+        `- Abstract: ${abstract}`,
+      ].join('\n');
+    });
+
+    const brief = [
+      '# PatentSphere AI Brief',
+      `Query: ${query || 'N/A'}`,
+      `Generated query: ${generatedQuery || 'N/A'}`,
+      `Exported results: ${Math.min(visibleResults.length, 10)} of ${visibleResults.length}`,
+      '',
+      ...rows,
+    ].join('\n\n');
+
+    const blob = new Blob([brief], { type: 'text/markdown;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `patentsphere_brief_${Date.now()}.md`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const toggleCompare = (patent: Patent) => {
+    setComparePatents((current) => {
+      if (current.some((item) => item.patent_id === patent.patent_id)) {
+        return current.filter((item) => item.patent_id !== patent.patent_id);
+      }
+      return [patent, ...current].slice(0, 3);
+    });
   };
 
   const handleExport = async (mode: 'current' | 'top100' = 'current') => {
@@ -176,12 +300,40 @@ export default function Home() {
           </button>
 
           <div className="hidden items-center gap-8 md:flex">
-            {['Solutions', 'For IP Teams'].map((item) => (
-              <button key={item} className="flex items-center gap-1 text-sm text-gray-700 transition-colors hover:text-black">
-                {item}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setOpenMenu(openMenu === 'solutions' ? null : 'solutions')}
+                className="flex items-center gap-1 text-sm text-gray-700 transition-colors hover:text-black"
+              >
+                Solutions
                 <ChevronDown className="h-3.5 w-3.5" />
               </button>
-            ))}
+              {openMenu === 'solutions' && (
+                <div className="absolute left-0 top-8 w-72 rounded-2xl border border-gray-200 bg-white p-2 text-left shadow-[0_18px_50px_rgba(15,23,42,0.14)]">
+                  <NavMenuButton icon={BrainCircuit} title="AI Query Builder" description="Viết query EPO từ câu hỏi tự nhiên" onClick={() => { setUseAI(true); setOpenMenu(null); document.getElementById('query-workspace')?.scrollIntoView({ behavior: 'smooth' }); }} />
+                  <NavMenuButton icon={Filter} title="Filter & Sort" description="Lọc theo nguồn, năm, chủ sở hữu" onClick={() => { setOpenMenu(null); document.getElementById('results')?.scrollIntoView({ behavior: 'smooth' }); }} />
+                  <NavMenuButton icon={Clipboard} title="AI Brief Export" description="Xuất brief Markdown cho nhóm đọc nhanh" onClick={() => { setOpenMenu(null); document.getElementById('results')?.scrollIntoView({ behavior: 'smooth' }); }} />
+                </div>
+              )}
+            </div>
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setOpenMenu(openMenu === 'teams' ? null : 'teams')}
+                className="flex items-center gap-1 text-sm text-gray-700 transition-colors hover:text-black"
+              >
+                For IP Teams
+                <ChevronDown className="h-3.5 w-3.5" />
+              </button>
+              {openMenu === 'teams' && (
+                <div className="absolute left-0 top-8 w-72 rounded-2xl border border-gray-200 bg-white p-2 text-left shadow-[0_18px_50px_rgba(15,23,42,0.14)]">
+                  <NavMenuButton icon={Scale} title="Legal review" description="So sánh nhanh tối đa 3 đơn" onClick={() => { setOpenMenu(null); document.getElementById('compare')?.scrollIntoView({ behavior: 'smooth' }); }} />
+                  <NavMenuButton icon={Database} title="R&D discovery" description="Bắt đầu bằng truy vấn công nghệ mẫu" onClick={() => { setQuery(sampleQueries[0]); setOpenMenu(null); document.getElementById('query-workspace')?.scrollIntoView({ behavior: 'smooth' }); }} />
+                  <NavMenuButton icon={Users} title="Business teams" description="Xuất CSV và brief để chia sẻ nội bộ" onClick={() => { setOpenMenu(null); document.getElementById('results')?.scrollIntoView({ behavior: 'smooth' }); }} />
+                </div>
+              )}
+            </div>
             <a className="text-sm text-gray-700 transition-colors hover:text-black" href="#workflow">Workflow</a>
             <a className="text-sm text-gray-700 transition-colors hover:text-black" href="#results">Results</a>
           </div>
@@ -215,7 +367,7 @@ export default function Home() {
             Nhập câu hỏi tự nhiên, PatentSphere tự chuyển thành truy vấn phù hợp, tìm trên EPO và PatentsView, rồi hỗ trợ phân tích từng bằng sáng chế bằng AI.
           </p>
 
-          <form onSubmit={(event) => handleSearch(event, 1)} className="animate-fade-in-up mx-auto mt-8 max-w-3xl opacity-0" style={{ animationDelay: '0.5s' }}>
+          <form id="query-workspace" onSubmit={(event) => handleSearch(event, 1)} className="animate-fade-in-up mx-auto mt-8 max-w-3xl opacity-0" style={{ animationDelay: '0.5s' }}>
             <div className="rounded-3xl border border-gray-200 bg-white p-2 text-left shadow-[0_24px_80px_rgba(15,23,42,0.10)]">
               <div className="flex items-center justify-between gap-3 border-b border-gray-100 px-4 py-3">
                 <div className="flex items-center gap-2">
@@ -244,10 +396,16 @@ export default function Home() {
                     }
                   }}
                 />
-                <Button type="submit" className="absolute bottom-3 right-3 rounded-full bg-black px-6 text-white hover:bg-gray-800" disabled={loading}>
+                <div className="absolute bottom-3 right-3 flex items-center gap-2">
+                  <Button type="button" variant="outline" className="hidden rounded-full md:inline-flex" onClick={saveCurrentQuery} disabled={!query.trim()}>
+                    <Bookmark className="mr-2 h-4 w-4" />
+                    Lưu
+                  </Button>
+                  <Button type="submit" className="rounded-full bg-black px-6 text-white hover:bg-gray-800" disabled={loading}>
                   {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
                   {loading ? 'Đang tìm...' : 'Ask AI'}
-                </Button>
+                  </Button>
+                </div>
               </div>
             </div>
 
@@ -263,6 +421,28 @@ export default function Home() {
                 </button>
               ))}
             </div>
+
+            {(queryHistory.length > 0 || savedQueries.length > 0) && (
+              <div className="mt-5 grid gap-3 text-left md:grid-cols-2">
+                {savedQueries.length > 0 && (
+                  <QueryList
+                    title="Saved queries"
+                    items={savedQueries}
+                    icon={Bookmark}
+                    onUse={setQuery}
+                    onRemove={removeSavedQuery}
+                  />
+                )}
+                {queryHistory.length > 0 && (
+                  <QueryList
+                    title="Recent queries"
+                    items={queryHistory}
+                    icon={Clock}
+                    onUse={setQuery}
+                  />
+                )}
+              </div>
+            )}
           </form>
 
           <div id="workflow" className="animate-fade-in-up mx-auto mt-12 max-w-3xl opacity-0" style={{ animationDelay: '0.6s' }}>
@@ -323,17 +503,68 @@ export default function Home() {
                     <div className="mt-3 flex max-w-3xl items-start gap-2 rounded-xl border border-gray-200 bg-gray-50 p-3 text-left">
                       <Terminal className="mt-0.5 h-4 w-4 shrink-0 text-gray-500" />
                       <code className="text-xs leading-5 text-gray-700">{generatedQuery}</code>
+                      <button type="button" onClick={handleCopyGeneratedQuery} className="ml-auto rounded-full border border-gray-200 bg-white px-2 py-1 text-xs font-medium text-gray-600 hover:text-black">
+                        <Copy className="mr-1 inline h-3 w-3" />
+                        Copy
+                      </button>
                     </div>
                   )}
                 </div>
 
                 {!loading && results.length > 0 && (
-                  <Button variant="outline" className="gap-2 rounded-full" onClick={() => handleExport(totalCount > results.length ? 'top100' : 'current')} disabled={isExporting}>
-                    {isExporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-                    {isExporting ? 'Đang xử lý...' : totalCount > results.length ? 'Xuất Top 100' : 'Xuất CSV'}
-                  </Button>
+                  <div className="flex flex-wrap gap-2">
+                    <Button variant="outline" className="gap-2 rounded-full" onClick={handleExportBrief}>
+                      <Clipboard className="h-4 w-4" />
+                      Xuất AI brief
+                    </Button>
+                    <Button variant="outline" className="gap-2 rounded-full" onClick={() => handleExport(totalCount > results.length ? 'top100' : 'current')} disabled={isExporting}>
+                      {isExporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                      {isExporting ? 'Đang xử lý...' : totalCount > results.length ? 'Xuất Top 100' : 'Xuất CSV'}
+                    </Button>
+                  </div>
                 )}
               </div>
+
+              {results.length > 0 && (
+                <div className="mb-6 rounded-3xl border border-gray-200 bg-gray-50 p-4">
+                  <div className="mb-3 flex items-center gap-2 text-sm font-semibold">
+                    <Filter className="h-4 w-4" />
+                    Filter workspace
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-4">
+                    <Select value={sourceFilter} onValueChange={(value) => setSourceFilter(value as SourceFilter)}>
+                      <SelectTrigger className="w-full bg-white">
+                        <SelectValue placeholder="Source" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          <SelectItem value="all">All sources</SelectItem>
+                          <SelectItem value="EPO">EPO only</SelectItem>
+                          <SelectItem value="PatentsView">PatentsView only</SelectItem>
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                    <Input value={yearFilter} onChange={(event) => setYearFilter(event.target.value)} placeholder="Year, e.g. 2024" className="bg-white" />
+                    <Input value={assigneeFilter} onChange={(event) => setAssigneeFilter(event.target.value)} placeholder="Assignee contains..." className="bg-white" />
+                    <Select value={sortMode} onValueChange={(value) => setSortMode(value as SortMode)}>
+                      <SelectTrigger className="w-full bg-white">
+                        <SelectValue placeholder="Sort" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          <SelectItem value="relevance">Original order</SelectItem>
+                          <SelectItem value="newest">Newest first</SelectItem>
+                          <SelectItem value="oldest">Oldest first</SelectItem>
+                          <SelectItem value="assignee">Assignee A-Z</SelectItem>
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <p className="mt-3 text-xs text-gray-500">
+                    Đang hiển thị {visibleResults.length} / {results.length} kết quả trong page hiện tại.
+                  </p>
+                </div>
+              )}
 
               {error && (
                 <div className="mb-6 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm font-medium text-red-700">
@@ -350,12 +581,46 @@ export default function Home() {
               ) : (
                 <>
                   <div className="grid grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-3">
-                    {results.map((patent, index) => (
+                    {visibleResults.map((patent, index) => (
                       <motion.div key={patent.patent_id} initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: index * 0.03 }}>
                         <PatentCard patent={patent} onClick={setSelectedPatent} />
+                        <Button
+                          variant={comparePatents.some((item) => item.patent_id === patent.patent_id) ? 'default' : 'outline'}
+                          size="sm"
+                          className="mt-2 w-full gap-2 rounded-full"
+                          onClick={() => toggleCompare(patent)}
+                        >
+                          <Scale className="h-4 w-4" />
+                          {comparePatents.some((item) => item.patent_id === patent.patent_id) ? 'Đã chọn so sánh' : 'So sánh'}
+                        </Button>
                       </motion.div>
                     ))}
                   </div>
+
+                  {comparePatents.length > 0 && (
+                    <div id="compare" className="mt-10 rounded-3xl border border-gray-200 bg-white p-5 shadow-sm">
+                      <div className="mb-4 flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-medium text-gray-500">Patent compare</p>
+                          <h3 className="text-xl font-semibold tracking-tight">So sánh nhanh {comparePatents.length} đơn</h3>
+                        </div>
+                        <Button variant="ghost" size="sm" onClick={() => setComparePatents([])}>Xóa</Button>
+                      </div>
+                      <div className="grid gap-3 md:grid-cols-3">
+                        {comparePatents.map((patent) => (
+                          <div key={patent.patent_id} className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                            <Badge variant="outline">{patent.patent_number}</Badge>
+                            <h4 className="mt-3 line-clamp-3 font-semibold">{patent.patent_title}</h4>
+                            <dl className="mt-4 grid gap-2 text-sm">
+                              <div><dt className="text-gray-500">Date</dt><dd>{patent.patent_date || 'N/A'}</dd></div>
+                              <div><dt className="text-gray-500">Assignee</dt><dd className="line-clamp-2">{patent.assignees?.[0]?.assignee_organization || 'Unknown'}</dd></div>
+                              <div><dt className="text-gray-500">Source</dt><dd>{patent.source || 'Unknown'}</dd></div>
+                            </dl>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                   {(results.length >= 20 || page > 1) && (
                     <div className="mt-10 flex items-center justify-center gap-3">
@@ -376,6 +641,78 @@ export default function Home() {
       </main>
 
       <PatentDetail patent={selectedPatent} isOpen={!!selectedPatent} onClose={() => setSelectedPatent(null)} />
+    </div>
+  );
+}
+
+function readStoredList(key: string) {
+  if (typeof window === 'undefined') return [];
+
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(key) || '[]');
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+function NavMenuButton({
+  icon: Icon,
+  title,
+  description,
+  onClick,
+}: {
+  icon: LucideIcon;
+  title: string;
+  description: string;
+  onClick: () => void;
+}) {
+  return (
+    <button type="button" onClick={onClick} className="flex w-full items-start gap-3 rounded-xl p-3 text-left transition-colors hover:bg-gray-50">
+      <span className="mt-0.5 flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200">
+        <Icon className="h-4 w-4" />
+      </span>
+      <span>
+        <span className="block text-sm font-semibold text-black">{title}</span>
+        <span className="mt-1 block text-xs leading-5 text-gray-500">{description}</span>
+      </span>
+    </button>
+  );
+}
+
+function QueryList({
+  title,
+  items,
+  icon: Icon,
+  onUse,
+  onRemove,
+}: {
+  title: string;
+  items: string[];
+  icon: LucideIcon;
+  onUse: (value: string) => void;
+  onRemove?: (value: string) => void;
+}) {
+  return (
+    <div className="rounded-2xl border border-gray-100 bg-gray-50 p-3">
+      <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">
+        <Icon className="h-3.5 w-3.5" />
+        {title}
+      </div>
+      <div className="flex flex-col gap-2">
+        {items.map((item) => (
+          <div key={item} className="flex items-center gap-2">
+            <button type="button" onClick={() => onUse(item)} className="min-w-0 flex-1 truncate rounded-full border border-gray-200 bg-white px-3 py-1.5 text-left text-xs text-gray-600 hover:text-black">
+              {item}
+            </button>
+            {onRemove && (
+              <button type="button" onClick={() => onRemove(item)} className="rounded-full px-2 py-1 text-xs text-gray-400 hover:text-black">
+                Xóa
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
